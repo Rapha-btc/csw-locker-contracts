@@ -1,21 +1,11 @@
 ;; title: ext-pillar-boost
 ;; version: 1.0
 ;; summary: One-click sBTC leverage via Zest + Bitflow
-;; description: Supply sBTC → Borrow aeUSDC → Swap to more sBTC
 
 (impl-trait .extension-trait.extension-trait)
 
 (define-constant err-invalid-payload (err u500))
 (define-constant err-invalid-action (err u501))
-
-;; Mainnet contract references
-(define-constant SBTC 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token)
-(define-constant AEUSDC 'SP3Y2ZSH8P7D50B0VBTSX11S7XSG24M1VB9YFQA4K.token-aeusdc)
-
-;; Bitflow pool references for aeUSDC → STX → sBTC route
-(define-constant TOKEN-STX 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.token-stx-v-1-2)
-(define-constant POOL-STX-AEUSDC 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-pool-stx-aeusdc-v-1-2)
-(define-constant POOL-SBTC-STX 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-pool-sbtc-stx-v-1-1)
 
 ;; ============================================================================
 ;; ENTRY POINT
@@ -26,19 +16,22 @@
       action: (string-ascii 10),
       sbtc-amount: uint,
       aeusdc-amount: uint,
-      min-received: uint
+      min-received: uint,
+      price-feed-bytes: (optional (buff 8192))
     } payload) err-invalid-payload)))
     
     (if (is-eq (get action details) "boost")
       (boost 
         (get sbtc-amount details) 
         (get aeusdc-amount details) 
-        (get min-received details))
+        (get min-received details)
+        (get price-feed-bytes details))
       (if (is-eq (get action details) "unwind")
         (unwind 
           (get sbtc-amount details) 
           (get aeusdc-amount details) 
-          (get min-received details))
+          (get min-received details)
+          (get price-feed-bytes details))
         err-invalid-action
       )
     )
@@ -52,47 +45,60 @@
 (define-private (boost 
     (sbtc-amount uint) 
     (aeusdc-to-borrow uint) 
-    (min-sbtc-from-swap uint))
+    (min-sbtc-from-swap uint)
+    (price-feed-bytes (optional (buff 8192))))
   (begin
     ;; Step 1: Supply sBTC as collateral to Zest
     (try! (contract-call? 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.borrow-helper-v2-1-7 supply
-      SBTC
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.zsbtc-v2-0          ;; lp token
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.pool-0-reserve-v2-0 ;; pool-reserve
+      'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token         ;; asset
       sbtc-amount
-      tx-sender  ;; owner = the CSW wallet
-      tx-sender  ;; on-behalf-of
+      tx-sender                                                      ;; owner
+      none                                                           ;; referral
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.incentives-v2-1-2   ;; incentives
     ))
     
     ;; Step 2: Borrow aeUSDC against collateral
     (try! (contract-call? 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.borrow-helper-v2-1-7 borrow
-      AEUSDC
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.pool-0-reserve-v2-0 ;; pool-reserve
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.oracle-v2-0         ;; oracle
+      'SP3Y2ZSH8P7D50B0VBTSX11S7XSG24M1VB9YFQA4K.token-aeusdc       ;; asset-to-borrow
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.zaeusdc-v2-0        ;; lp
+      (list)                                                         ;; assets list - needs proper config
       aeusdc-to-borrow
-      tx-sender  ;; on-behalf-of
-      tx-sender  ;; owner
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.fees-calculator-v2-0 ;; fee-calculator
+      u2                                                             ;; interest-rate-mode (variable)
+      tx-sender                                                      ;; owner
+      price-feed-bytes
     ))
     
     ;; Step 3: Swap aeUSDC → STX → sBTC via Bitflow
     (let ((sbtc-received (try! (contract-call? 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-swap-helper-v-1-3 swap-helper-b
         aeusdc-to-borrow
         min-sbtc-from-swap
-        none  ;; no aggregator provider
+        none
         {
-          a: AEUSDC,
-          b: TOKEN-STX,
-          c: TOKEN-STX,
-          d: SBTC
+          a: 'SP3Y2ZSH8P7D50B0VBTSX11S7XSG24M1VB9YFQA4K.token-aeusdc,
+          b: 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.token-stx-v-1-2,
+          c: 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.token-stx-v-1-2,
+          d: 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
         }
         {
-          a: POOL-STX-AEUSDC,
-          b: POOL-SBTC-STX
+          a: 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-pool-stx-aeusdc-v-1-2,
+          b: 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-pool-sbtc-stx-v-1-1
         }
       ))))
       
       ;; Step 4: Supply swapped sBTC as additional collateral
       (try! (contract-call? 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.borrow-helper-v2-1-7 supply
-        SBTC
+        'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.zsbtc-v2-0
+        'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.pool-0-reserve-v2-0
+        'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
         sbtc-received
         tx-sender
-        tx-sender
+        none
+        'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.incentives-v2-1-2
       ))
       
       (print {
@@ -119,14 +125,20 @@
 (define-private (unwind 
     (sbtc-to-withdraw uint) 
     (aeusdc-to-repay uint) 
-    (min-aeusdc-from-swap uint))
+    (min-aeusdc-from-swap uint)
+    (price-feed-bytes (optional (buff 8192))))
   (begin
     ;; Step 1: Withdraw sBTC collateral from Zest
     (try! (contract-call? 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.borrow-helper-v2-1-7 withdraw
-      SBTC
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.zsbtc-v2-0
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.pool-0-reserve-v2-0
+      'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.oracle-v2-0
       sbtc-to-withdraw
-      tx-sender  ;; owner
-      tx-sender  ;; on-behalf-of
+      tx-sender
+      (list)  ;; assets list - needs proper config
+      'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.incentives-v2-1-2
+      price-feed-bytes
     ))
     
     ;; Step 2: Swap sBTC → STX → aeUSDC via Bitflow (reverse route)
@@ -135,26 +147,24 @@
         min-aeusdc-from-swap
         none
         {
-          a: SBTC,
-          b: TOKEN-STX,
-          c: TOKEN-STX,
-          d: AEUSDC
+          a: 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token,
+          b: 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.token-stx-v-1-2,
+          c: 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.token-stx-v-1-2,
+          d: 'SP3Y2ZSH8P7D50B0VBTSX11S7XSG24M1VB9YFQA4K.token-aeusdc
         }
         {
-          a: POOL-SBTC-STX,
-          b: POOL-STX-AEUSDC
+          a: 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-pool-sbtc-stx-v-1-1,
+          b: 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-pool-stx-aeusdc-v-1-2
         }
       ))))
       
       ;; Step 3: Repay aeUSDC debt
       (try! (contract-call? 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.borrow-helper-v2-1-7 repay
-        AEUSDC
+        'SP3Y2ZSH8P7D50B0VBTSX11S7XSG24M1VB9YFQA4K.token-aeusdc
         aeusdc-to-repay
         tx-sender  ;; on-behalf-of
-        tx-sender  ;; owner
+        tx-sender  ;; payer
       ))
-      
-      ;; Step 4: If excess aeUSDC, it stays in wallet (user can withdraw separately)
       
       (print {
         action: "unwind",
