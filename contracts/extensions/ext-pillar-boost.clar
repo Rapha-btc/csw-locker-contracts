@@ -138,7 +138,6 @@
 (define-private (unwind 
     (sbtc-to-withdraw-for-swap uint)
     (sbtc-to-withdraw-final uint)
-    (aeusdc-to-repay uint) 
     (min-aeusdc-from-swap uint)
     (price-feed-bytes (optional (buff 8192))))
   (begin
@@ -186,7 +185,7 @@
       ;; Step 3: Repay aeUSDC debt
       (try! (contract-call? 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.borrow-helper-v2-1-7 repay
         'SP3Y2ZSH8P7D50B0VBTSX11S7XSG24M1VB9YFQA4K.token-aeusdc
-        aeusdc-to-repay
+        aeusdc-received
         tx-sender
         tx-sender
       ))
