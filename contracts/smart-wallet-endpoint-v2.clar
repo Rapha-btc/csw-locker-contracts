@@ -150,7 +150,7 @@
       pubkey: (buff 33),
     }))
   )
-  (contract-call? sm extension-call .ext-pillar-boost
+  (contract-call? sm extension-call .ext-pillar
     (unwrap! (to-consensus-buff? {
       sbtc-amount: sbtc-amount,
       aeusdc-to-borrow: aeusdc-to-borrow,
@@ -173,7 +173,7 @@
       pubkey: (buff 33),
     }))
   )
-  (contract-call? sm extension-call .ext-pillar-unwind
+  (contract-call? sm extension-call .ext-pillar
     (unwrap! (to-consensus-buff? {
       sbtc-to-swap: sbtc-to-swap,
       sbtc-to-withdraw: sbtc-to-withdraw,
