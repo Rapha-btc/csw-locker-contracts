@@ -76,11 +76,6 @@ path = 'contracts/extensions/ext-delegate-stx-pox-4_flow_test.clar'
 clarity_version = 4
 epoch = '3.3'
 
-[contracts.ext-pillar-boost]
-path = 'contracts/ext-pillar-boost.clar'
-clarity_version = 4
-epoch = 'latest'
-
 [contracts.ext-sponsored-sbtc-transfer]
 path = 'contracts/extensions/extensins/ext-sponsored-sbtc-transfer.clar'
 clarity_version = 4

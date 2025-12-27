@@ -107,3 +107,17 @@
       })))
     )))
 )
+
+(define-read-only (build-propose-recovery-hash (details {
+  auth-id: uint,
+  new-recovery: principal,
+}))
+  (sha256 (concat SIP018_MSG_PREFIX
+    (concat (get-domain-hash)
+      (sha256 (unwrap-panic (to-consensus-buff? {
+        topic: "propose-recovery",
+        auth-id: (get auth-id details),
+        new-recovery: (get new-recovery details),
+      })))
+    )))
+)

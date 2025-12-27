@@ -17,6 +17,7 @@
 (define-constant err-no-auth-id (err u4007))
 (define-constant err-no-message-hash (err u4008))
 (define-constant err-inactive-required (err u4009))
+(define-constant err-no-pending-recovery (err u4010))
 (define-constant err-fatal-owner-not-admin (err u9999))
 
 (define-constant INACTIVITY-PERIOD u52560) 
@@ -26,6 +27,7 @@
 (define-data-var initial-pubkey (buff 33) 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)
 
 (define-data-var owner principal 'SP000000000000000000002Q6VF78)
+(define-data-var pending-recovery principal 'SP000000000000000000002Q6VF78)
 
 (define-fungible-token ect)
 
@@ -361,10 +363,51 @@
       signature: (get signature sig-auth),
       pubkey: (get pubkey sig-auth),
     })))
+    ;; Remove burn address from admins (first-time setup)
+    (map-delete admins 'SP000000000000000000002Q6VF78)
     (map-set admins new-admin true)
     (map-set pubkey-to-admin (get pubkey sig-auth) new-admin)
+    (var-set owner new-admin)
     (update-activity)
     (print { a: "add-admin", admin: new-admin })
+    (ok true)
+  )
+)
+
+(define-public (propose-recovery
+    (new-recovery principal)
+    (sig-auth {
+      auth-id: uint,
+      signature: (buff 64),
+      pubkey: (buff 33),
+    })
+  )
+  (begin
+    (try! (is-authorized (some {
+      message-hash: (contract-call? 
+        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+        build-propose-recovery-hash {
+        auth-id: (get auth-id sig-auth),
+        new-recovery: new-recovery,
+      }),
+      signature: (get signature sig-auth),
+      pubkey: (get pubkey sig-auth),
+    })))
+    (var-set pending-recovery new-recovery)
+    (update-activity)
+    (print { a: "propose-recovery", proposed: new-recovery })
+    (ok true)
+  )
+)
+
+(define-public (confirm-recovery)
+  (let ((pending (var-get pending-recovery)))
+    (asserts! (not (is-eq pending 'SP000000000000000000002Q6VF78)) err-no-pending-recovery)
+    (is-admin-calling tx-sender)
+    (var-set recovery-address pending)
+    (var-set pending-recovery 'SP000000000000000000002Q6VF78)
+    (update-activity)
+    (print { a: "confirm-recovery", recovery: pending })
     (ok true)
   )
 )
@@ -372,11 +415,12 @@
 (define-public (recover-inactive-wallet (new-admin principal))
   (begin
     (asserts! (is-inactive) err-inactive-required)
-    (asserts! (or 
-      (is-eq tx-sender (var-get recovery-address))
-      (is-some (map-get? admins tx-sender))
-    ) err-unauthorised)
+    (asserts! (is-eq tx-sender (var-get recovery-address)) err-unauthorised)
+    ;; Remove old admin
+    (map-delete admins (var-get owner))
+    ;; Set new admin
     (map-set admins new-admin true)
+    (var-set owner new-admin)
     (var-set last-activity-block burn-block-height)
     (print { a: "recover-inactive-wallet", new-admin: new-admin, recovered-by: tx-sender })
     (ok true)
@@ -385,7 +429,7 @@
 
 ;; init - Pillar deploys, only current-contract is admin
 (map-set admins 'SP000000000000000000002Q6VF78 true)
-(map-set admins current-contract true)
+(map-set admins current-contract true) ;; why this idk?
 
 (begin
     (var-set initial-pubkey 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)

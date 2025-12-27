@@ -323,4 +323,4 @@
 
 ;; init
 (map-set admins tx-sender true)
-(map-set admins current-contract true)
+;; (map-set admins current-contract true)
