@@ -93,3 +93,17 @@
       })))
     )))
 )
+
+(define-read-only (build-add-admin-hash (details {
+  auth-id: uint,
+  new-admin: principal,
+}))
+  (sha256 (concat SIP018_MSG_PREFIX
+    (concat (get-domain-hash)
+      (sha256 (unwrap-panic (to-consensus-buff? {
+        topic: "add-admin",
+        auth-id: (get auth-id details),
+        new-admin: (get new-admin details),
+      })))
+    )))
+)

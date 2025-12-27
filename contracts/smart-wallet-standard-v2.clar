@@ -16,9 +16,16 @@
 (define-constant err-signature-replay (err u4006))
 (define-constant err-no-auth-id (err u4007))
 (define-constant err-no-message-hash (err u4008))
+(define-constant err-inactive-required (err u4009))
 (define-constant err-fatal-owner-not-admin (err u9999))
 
-(define-data-var owner principal tx-sender)
+(define-constant INACTIVITY-PERIOD u52560) 
+
+(define-data-var last-activity-block uint burn-block-height)
+(define-data-var recovery-address principal 'SP000000000000000000002Q6VF78)
+(define-data-var initial-pubkey (buff 33) 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)
+
+(define-data-var owner principal 'SP000000000000000000002Q6VF78)
 
 (define-fungible-token ect)
 
@@ -59,6 +66,7 @@
     }))
   )
   (begin
+    (update-activity)
     (match sig-auth
       sig-auth-details (try! (is-authorized (some {
         message-hash: (contract-call?
@@ -100,6 +108,7 @@
     }))
   )
   (begin
+    (update-activity)
     (match sig-auth
       sig-auth-details (try! (is-authorized (some {
         message-hash: (contract-call?
@@ -146,6 +155,7 @@
     }))
   )
   (begin
+    (update-activity)
     (match sig-auth
       sig-auth-details (try! (is-authorized (some {
         message-hash: (contract-call?
@@ -189,6 +199,7 @@
     }))
   )
   (begin
+    (update-activity)
     (match sig-auth
       sig-auth-details (try! (is-authorized (some {
         message-hash: (contract-call?
@@ -321,6 +332,64 @@
   (ok (var-get owner))
 )
 
-;; init
-(map-set admins tx-sender true)
+;; kill switch
+(define-read-only (is-inactive)
+  (> burn-block-height (+ INACTIVITY-PERIOD (var-get last-activity-block)))
+)
+
+(define-private (update-activity)
+  (var-set last-activity-block burn-block-height)
+)
+
+
+(define-public (add-admin-with-signature
+    (new-admin principal)
+    (sig-auth {
+      auth-id: uint,
+      signature: (buff 64),
+      pubkey: (buff 33),
+    })
+  )
+  (begin
+    (try! (is-authorized (some {
+      message-hash: (contract-call? 
+        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+        build-add-admin-hash {
+        auth-id: (get auth-id sig-auth),
+        new-admin: new-admin,
+      }),
+      signature: (get signature sig-auth),
+      pubkey: (get pubkey sig-auth),
+    })))
+    (map-set admins new-admin true)
+    (map-set pubkey-to-admin (get pubkey sig-auth) new-admin)
+    (update-activity)
+    (print { a: "add-admin", admin: new-admin })
+    (ok true)
+  )
+)
+
+(define-public (recover-inactive-wallet (new-admin principal))
+  (begin
+    (asserts! (is-inactive) err-inactive-required)
+    (asserts! (or 
+      (is-eq tx-sender (var-get recovery-address))
+      (is-some (map-get? admins tx-sender))
+    ) err-unauthorised)
+    (map-set admins new-admin true)
+    (var-set last-activity-block burn-block-height)
+    (print { a: "recover-inactive-wallet", new-admin: new-admin, recovered-by: tx-sender })
+    (ok true)
+  )
+)
+
+;; init - Pillar deploys, only current-contract is admin
+(map-set admins 'SP000000000000000000002Q6VF78 true)
 (map-set admins current-contract true)
+
+(begin
+    (var-set initial-pubkey 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)
+    (var-set last-activity-block burn-block-height)
+    (map-set pubkey-to-admin 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca 'SP000000000000000000002Q6VF78)
+    (ok true)
+)
