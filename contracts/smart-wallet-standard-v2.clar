@@ -18,9 +18,18 @@
 (define-constant err-no-message-hash (err u4008))
 (define-constant err-inactive-required (err u4009))
 (define-constant err-no-pending-recovery (err u4010))
+(define-constant err-not-whitelisted (err u4011))
+(define-constant err-in-cooldown (err u4012))
+(define-constant err-invalid-operation (err u4013))
+(define-constant err-already-executed (err u4014))
+(define-constant err-vetoed (err u4015))
+(define-constant err-not-signaled (err u4016))
+(define-constant err-cooldown-not-passed (err u4017))
+(define-constant err-threshold-exceeded (err u4018))
 (define-constant err-fatal-owner-not-admin (err u9999))
 
 (define-constant INACTIVITY-PERIOD u52560) 
+(define-constant DEPLOYED-BURNT-BLOCK burn-block-height)
 
 (define-data-var last-activity-block uint burn-block-height)
 (define-data-var recovery-address principal 'SP000000000000000000002Q6VF78)
@@ -50,6 +59,50 @@
   cooldown-period: u144,
   config-signaled-at: none,
 })
+
+(define-data-var spent-this-period {
+  stx: uint,
+  sbtc: uint,
+  sip: uint,
+  period-start: uint,
+} {
+  stx: u0,
+  sbtc: u0,
+  sip: u0,
+  period-start: DEPLOYED-BURNT-BLOCK,
+})
+
+(define-private (get-current-spent)
+  (let (
+      (spent (var-get spent-this-period))
+      (config (var-get wallet-config))
+      (period-expired (> burn-block-height (+ (get period-start spent) (get cooldown-period config))))
+    )
+    (if period-expired
+      ;; Reset if period expired
+      { stx: u0, sbtc: u0, sip: u0, period-start: burn-block-height }
+      spent
+    )
+  )
+)
+
+(define-private (add-spent-stx (amount uint))
+  (let ((current (get-current-spent)))
+    (var-set spent-this-period (merge current { stx: (+ (get stx current) amount) }))
+  )
+)
+
+(define-private (add-spent-sbtc (amount uint))
+  (let ((current (get-current-spent)))
+    (var-set spent-this-period (merge current { sbtc: (+ (get sbtc current) amount) }))
+  )
+)
+
+(define-private (add-spent-sip (amount uint))
+  (let ((current (get-current-spent)))
+    (var-set spent-this-period (merge current { sip: (+ (get sip current) amount) }))
+  )
+)
 
 (define-map whitelisted-extensions principal bool)
 
@@ -159,20 +212,30 @@
   (map-get? pending-operations op-id)
 )
 
-(define-private (needs-cooldown-stx (amount uint))
-  (let ((config (var-get wallet-config)))
-    (> amount (get stx-threshold config))
+(define-private (would-exceed-stx-threshold (amount uint))
+  (let (
+      (config (var-get wallet-config))
+      (spent (get-current-spent))
+    )
+    (> (+ (get stx spent) amount) (get stx-threshold config))
   )
 )
 
-(define-private (needs-cooldown-sbtc (amount uint))
-  (let ((config (var-get wallet-config)))
-    (> amount (get sbtc-threshold config))
+(define-private (would-exceed-sbtc-threshold (amount uint))
+  (let (
+      (config (var-get wallet-config))
+      (spent (get-current-spent))
+    )
+    (> (+ (get sbtc spent) amount) (get sbtc-threshold config))
   )
 )
-(define-private (needs-cooldown-sip (amount uint))
-  (let ((config (var-get wallet-config)))
-    (> amount (get sip-threshold config))
+
+(define-private (would-exceed-sip-threshold (amount uint))
+  (let (
+      (config (var-get wallet-config))
+      (spent (get-current-spent))
+    )
+    (> (+ (get sip spent) amount) (get sip-threshold config))
   )
 )
 
@@ -194,8 +257,7 @@
   (ok (asserts! (is-some (map-get? admins caller)) err-unauthorised))
 )
 
-;;
-;; calls with context switching
+;; Action functions
 ;;
 (define-public (stx-transfer
     (amount uint)
@@ -279,10 +341,6 @@
     )
   )
 )
-
-;;
-;; calls without context switching
-;;
 
 (define-public (sip010-transfer
     (amount uint)
