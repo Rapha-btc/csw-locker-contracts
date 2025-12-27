@@ -36,6 +36,146 @@
   (buff 33) ;; pubkey that signed the message
 )
 
+;; Limits ;; Extension whitelist uses separate map
+(define-data-var wallet-config {
+  stx-threshold: uint,           ;; e.g. u100000000 (100 STX)   ;; Thresholds (above = cooldown required)
+  sbtc-threshold: uint,          ;; e.g. u100000 (0.001 BTC)
+  sip-threshold: uint,         ;; e.g. u1000 (1000 micro tokens)
+  cooldown-period: uint,         ;; e.g. u144 (24h in burn blocks)   ;; Cooldown settings
+  config-signaled-at: (optional uint),   ;; Config change signaling
+} {
+  stx-threshold: u100000000,
+  sbtc-threshold: u100000,
+  sip-threshold: u1000,
+  cooldown-period: u144,
+  config-signaled-at: none,
+})
+
+(define-map whitelisted-extensions principal bool)
+
+(define-map pending-operations
+  uint 
+  {
+    op-type: (string-ascii 20),
+    amount: uint,
+    recipient: principal,
+    token: (optional principal),  ;; for sip010
+    extension: (optional principal),  ;; for extension-call
+    payload: (optional (buff 2048)),
+    execute-after: uint,
+    executed: bool,
+    vetoed: bool,
+  }
+)
+
+(define-data-var operation-nonce uint u0)
+
+(define-public (signal-config-change)
+  (let ((config (var-get wallet-config)))
+    (try! (is-authorized none))
+    (var-set wallet-config (merge config { config-signaled-at: (some burn-block-height) }))
+    (print { a: "signal-config-change", signaled-at: burn-block-height })
+    (ok true)
+  )
+)
+
+(define-public (set-wallet-config
+    (new-stx-threshold uint)
+    (new-sbtc-threshold uint)
+    (new-sip-threshold uint)
+    (new-cooldown-period uint)
+  )
+  (let (
+      (config (var-get wallet-config))
+      (signaled-at (default-to u0 (get config-signaled-at config)))
+    )
+    (try! (is-authorized none))
+    (asserts! (not (is-eq signaled-at u0)) err-not-signaled)
+    (asserts! (>= burn-block-height (+ signaled-at (get cooldown-period config))) err-in-cooldown)
+    (var-set wallet-config {
+      stx-threshold: new-stx-threshold,
+      sbtc-threshold: new-sbtc-threshold,
+      sip-threshold: new-sip-threshold,
+      cooldown-period: new-cooldown-period,
+      config-signaled-at: none,
+    })
+    (print { 
+      a: "set-wallet-config", 
+      stx-threshold: new-stx-threshold,
+      sbtc-threshold: new-sbtc-threshold,
+      sip-threshold: new-sip-threshold,
+      cooldown-period: new-cooldown-period,
+    })
+    (ok true)
+  )
+)
+
+(define-private (create-pending-operation
+    (op-type (string-ascii 20))
+    (amount uint)
+    (recipient principal)
+    (token (optional principal))
+    (extension (optional principal))
+    (payload (optional (buff 2048)))
+  )
+  (let (
+      (config (var-get wallet-config))
+      (op-id (var-get operation-nonce))
+    )
+    (map-set pending-operations op-id {
+      op-type: op-type,
+      amount: amount,
+      recipient: recipient,
+      token: token,
+      extension: extension,
+      payload: payload,
+      execute-after: (+ burn-block-height (get cooldown-period config)),
+      executed: false,
+      vetoed: false,
+    })
+    (var-set operation-nonce (+ op-id u1))
+    (print { 
+      a: "pending-operation-created",
+      op-id: op-id,
+      op-type: op-type,
+      amount: amount,
+      execute-after: (+ burn-block-height (get cooldown-period config)),
+    })
+    (ok op-id)
+  )
+)
+
+(define-public (veto-operation (op-id uint))
+  (let ((op (unwrap! (map-get? pending-operations op-id) err-invalid-operation)))
+    (try! (is-authorized none))
+    (asserts! (not (get executed op)) err-already-executed)
+    (map-set pending-operations op-id (merge op { vetoed: true }))
+    (print { a: "operation-vetoed", op-id: op-id })
+    (ok true)
+  )
+)
+
+(define-read-only (get-pending-operation (op-id uint))
+  (map-get? pending-operations op-id)
+)
+
+(define-private (needs-cooldown-stx (amount uint))
+  (let ((config (var-get wallet-config)))
+    (> amount (get stx-threshold config))
+  )
+)
+
+(define-private (needs-cooldown-sbtc (amount uint))
+  (let ((config (var-get wallet-config)))
+    (> amount (get sbtc-threshold config))
+  )
+)
+(define-private (needs-cooldown-sip (amount uint))
+  (let ((config (var-get wallet-config)))
+    (> amount (get sip-threshold config))
+  )
+)
+
 ;; Authentication
 (define-private (is-authorized (sig-message-auth (optional {
   message-hash: (buff 32),
