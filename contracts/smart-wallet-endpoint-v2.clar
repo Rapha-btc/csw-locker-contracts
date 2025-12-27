@@ -138,7 +138,7 @@
   )
 )
 
-(define-public (boost
+(define-public (pillar-boost
     (sm <wallet-trait>)
     (sbtc-amount uint)
     (aeusdc-to-borrow uint)
@@ -152,22 +152,19 @@
   )
   (contract-call? sm extension-call .ext-pillar-boost
     (unwrap! (to-consensus-buff? {
-      action: "boost",
       sbtc-amount: sbtc-amount,
-      sbtc-amount-2: u0,
-      aeusdc-amount: aeusdc-to-borrow,
-      min-received: min-sbtc-from-swap,
+      aeusdc-to-borrow: aeusdc-to-borrow,
+      min-sbtc-from-swap: min-sbtc-from-swap,
       price-feed-bytes: price-feed-bytes,
     }) err-invalid-payload)
     sig-auth
   )
 )
 
-;; Unwind: Withdraw sBTC → Swap to aeUSDC → Repay → Withdraw remaining
-(define-public (unwind
+(define-public (pillar-unwind
     (sm <wallet-trait>)
-    (sbtc-to-withdraw-for-swap uint)
-    (sbtc-to-withdraw-final uint)
+    (sbtc-to-swap uint)
+    (sbtc-to-withdraw uint)
     (min-aeusdc-from-swap uint)
     (price-feed-bytes (optional (buff 8192)))
     (sig-auth (optional {
@@ -176,13 +173,11 @@
       pubkey: (buff 33),
     }))
   )
-  (contract-call? sm extension-call .ext-pillar-boost
+  (contract-call? sm extension-call .ext-pillar-unwind
     (unwrap! (to-consensus-buff? {
-      action: "unwind",
-      sbtc-amount: sbtc-to-withdraw-for-swap,
-      sbtc-amount-2: sbtc-to-withdraw-final,
-      aeusdc-amount: u0,
-      min-received: min-aeusdc-from-swap,
+      sbtc-to-swap: sbtc-to-swap,
+      sbtc-to-withdraw: sbtc-to-withdraw,
+      min-aeusdc-from-swap: min-aeusdc-from-swap,
       price-feed-bytes: price-feed-bytes,
     }) err-invalid-payload)
     sig-auth
