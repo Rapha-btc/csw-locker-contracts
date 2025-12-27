@@ -403,7 +403,7 @@
 (define-public (confirm-recovery)
   (let ((pending (var-get pending-recovery)))
     (asserts! (not (is-eq pending 'SP000000000000000000002Q6VF78)) err-no-pending-recovery)
-    (is-admin-calling tx-sender)
+    (try! (is-admin-calling tx-sender))
     (var-set recovery-address pending)
     (var-set pending-recovery 'SP000000000000000000002Q6VF78)
     (update-activity)
@@ -431,9 +431,19 @@
 (map-set admins 'SP000000000000000000002Q6VF78 true)
 (map-set admins current-contract true) ;; why this idk?
 
+;; (begin
+;;     (var-set initial-pubkey 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)
+;;     (var-set last-activity-block burn-block-height)
+;;     (map-set pubkey-to-admin 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca 'SP000000000000000000002Q6VF78)
+;;     (ok true)
+;; )
+
 (begin
     (var-set initial-pubkey 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)
-    (var-set last-activity-block burn-block-height)
     (map-set pubkey-to-admin 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca 'SP000000000000000000002Q6VF78)
-    (ok true)
+    (add-admin-with-signature 'SPZSQNQF9SM88N00K4XYV05ZAZRACC748T78P5P3 {
+      auth-id: u0,
+      signature: 0x3045022100dff1d77f2a671c5f36183726db2341be0e6f5e8ff12e7c6f3c8f1a5a4f1baac6022036efc3f4a31188eb0c6e7b6f5d4a3e6e0b4e7f5e8f3c6f7e8f9e0f1a2b3c4d5e6,
+      pubkey: 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca,
+    })
 )
