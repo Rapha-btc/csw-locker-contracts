@@ -1,4 +1,4 @@
-;; title: ext-pillar-boost
+;; title: ext-pillar
 ;; version: 1.0
 ;; summary: One-click sBTC leverage via Zest + Bitflow
 
@@ -31,7 +31,6 @@
         (unwind 
           (get sbtc-amount details)
           (get sbtc-amount-2 details)
-          (get aeusdc-amount details) 
           (get min-received details)
           (get price-feed-bytes details))
         err-invalid-action
@@ -136,18 +135,18 @@
 ;; ============================================================================
 
 (define-private (unwind 
-    (sbtc-to-withdraw-for-swap uint)
-    (sbtc-to-withdraw-final uint)
+    (sbtc-to-swap uint)
+    (sbtc-to-withdraw uint)
     (min-aeusdc-from-swap uint)
     (price-feed-bytes (optional (buff 8192))))
   (begin
-    ;; Step 1: Withdraw some sBTC from Zest (to swap for repayment)
+    ;; Step 1: Withdraw sBTC from Zest (to swap for repayment)
     (try! (contract-call? 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.borrow-helper-v2-1-7 withdraw
       'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.zsbtc-v2-0
       'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.pool-0-reserve-v2-0
       'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
       'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.stx-btc-oracle-v1-4
-      sbtc-to-withdraw-for-swap
+      sbtc-to-swap
       tx-sender
       (list
         { asset: 'SP4SZE494VC2YC5JYG7AYFQ44F5Q4PYV7DVMDPBG.ststx-token, lp-token: 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.zststx-v2-0, oracle: 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.stx-btc-oracle-v1-4 }
@@ -167,7 +166,7 @@
     
     ;; Step 2: Swap sBTC → STX → aeUSDC via Bitflow
     (let ((aeusdc-received (try! (contract-call? 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-swap-helper-v-1-3 swap-helper-b
-        sbtc-to-withdraw-for-swap
+        sbtc-to-swap
         min-aeusdc-from-swap
         none
         {
@@ -190,13 +189,13 @@
         tx-sender
       ))
       
-      ;; Step 4: Withdraw remaining sBTC (debt is now repaid)
+      ;; Step 4: Withdraw remaining sBTC
       (try! (contract-call? 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.borrow-helper-v2-1-7 withdraw
         'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.zsbtc-v2-0
         'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.pool-0-reserve-v2-0
         'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
         'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.stx-btc-oracle-v1-4
-        sbtc-to-withdraw-final
+        sbtc-to-withdraw
         tx-sender
         (list
           { asset: 'SP4SZE494VC2YC5JYG7AYFQ44F5Q4PYV7DVMDPBG.ststx-token, lp-token: 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.zststx-v2-0, oracle: 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.stx-btc-oracle-v1-4 }
@@ -216,17 +215,15 @@
       
       (print {
         action: "unwind",
-        sbtc-withdrawn-for-swap: sbtc-to-withdraw-for-swap,
-        aeusdc-from-swap: aeusdc-received,
-        aeusdc-repaid: aeusdc-to-repay,
-        sbtc-withdrawn-final: sbtc-to-withdraw-final
+        sbtc-swapped: sbtc-to-swap,
+        aeusdc-received: aeusdc-received,
+        sbtc-withdrawn: sbtc-to-withdraw
       })
       
       (ok {
-        sbtc-withdrawn-for-swap: sbtc-to-withdraw-for-swap,
+        sbtc-swapped: sbtc-to-swap,
         aeusdc-received: aeusdc-received,
-        aeusdc-repaid: aeusdc-to-repay,
-        sbtc-withdrawn-final: sbtc-to-withdraw-final
+        sbtc-withdrawn: sbtc-to-withdraw
       })
     )
   )

@@ -1,8 +1,9 @@
 ;; title: smart-wallet-endpoint
-;; version:
-;; summary:
-;; description:
+;; version: 1.0
+;; summary: Typed API for smart wallet operations
+
 (define-constant err-invalid-payload (err u5000))
+
 (use-trait sip-010-token 'SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard.sip-010-trait)
 (use-trait wallet-trait .smart-wallet-trait.smart-wallet-trait)
 (use-trait extension-trait 'ST3FFRX7C911PZP5RHE148YDVDD9JWVS6FZRA60VS.extension-trait.extension-trait)
@@ -66,15 +67,10 @@
 (define-public (sbtc-transfer-many-sponsored
     (sm <wallet-trait>)
     (details {
-      recipients: (list
-        11
-        {
-          ;; Amount in sats.
-          a: uint,
-          ;; Recipient address.
-          r: principal,
-        }
-      ),
+      recipients: (list 11 {
+        a: uint,
+        r: principal,
+      }),
       fees: uint,
     })
     (sig-auth (optional {
@@ -138,6 +134,10 @@
   )
 )
 
+;; ============================================================================
+;; PILLAR ENDPOINTS
+;; ============================================================================
+
 (define-public (pillar-boost
     (sm <wallet-trait>)
     (sbtc-amount uint)
@@ -152,9 +152,11 @@
   )
   (contract-call? sm extension-call .ext-pillar
     (unwrap! (to-consensus-buff? {
+      action: "boost",
       sbtc-amount: sbtc-amount,
-      aeusdc-to-borrow: aeusdc-to-borrow,
-      min-sbtc-from-swap: min-sbtc-from-swap,
+      sbtc-amount-2: u0,
+      aeusdc-amount: aeusdc-to-borrow,
+      min-received: min-sbtc-from-swap,
       price-feed-bytes: price-feed-bytes,
     }) err-invalid-payload)
     sig-auth
@@ -175,9 +177,11 @@
   )
   (contract-call? sm extension-call .ext-pillar
     (unwrap! (to-consensus-buff? {
-      sbtc-to-swap: sbtc-to-swap,
-      sbtc-to-withdraw: sbtc-to-withdraw,
-      min-aeusdc-from-swap: min-aeusdc-from-swap,
+      action: "unwind",
+      sbtc-amount: sbtc-to-swap,
+      sbtc-amount-2: sbtc-to-withdraw,
+      aeusdc-amount: u0,
+      min-received: min-aeusdc-from-swap,
       price-feed-bytes: price-feed-bytes,
     }) err-invalid-payload)
     sig-auth
