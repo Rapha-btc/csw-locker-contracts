@@ -29,6 +29,7 @@
 (define-constant err-cooldown-too-long (err u4019))
 (define-constant err-no-pending-transfer (err u4020))
 (define-constant err-no-pending-pubkey (err u4021))
+(define-constant err-already-initialized (err u4022))
 (define-constant err-fatal-owner-not-admin (err u9999))
 
 (define-constant INACTIVITY-PERIOD u52560) 
@@ -39,6 +40,7 @@
 (define-data-var last-activity-block uint burn-block-height)
 (define-data-var recovery-address principal 'SP000000000000000000002Q6VF78)
 (define-data-var initial-pubkey (buff 33) 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)
+(define-data-var is-initialized bool false)
 
 (define-data-var pending-pubkey {
   pubkey: (buff 33),
@@ -687,6 +689,7 @@
     })
   )
   (begin
+    (asserts! (not (var-get is-initialized)) err-already-initialized)
     (try! (is-authorized (some {
       message-hash: (contract-call? 
         'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
@@ -703,6 +706,7 @@
     (map-set pubkey-to-admin (get pubkey sig-auth) new-admin)
     (var-set owner new-admin)
     (update-activity)
+    (var-set is-initialized true)
     (print { a: "add-admin", admin: new-admin })
     (ok true)
   )
