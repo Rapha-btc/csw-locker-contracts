@@ -2,7 +2,7 @@
 ;; version: 1.0
 ;; summary: One-click sBTC leverage via Zest + Bitflow
 
-(impl-trait .extension-trait.extension-trait)
+(impl-trait 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.extension-trait.extension-trait)
 
 (define-constant err-invalid-payload (err u500))
 (define-constant err-invalid-action (err u501))
@@ -22,17 +22,23 @@
     } payload) err-invalid-payload)))
     
     (if (is-eq (get action details) "boost")
-      (boost 
-        (get sbtc-amount details) 
-        (get aeusdc-amount details) 
-        (get min-received details)
-        (get price-feed-bytes details))
-      (if (is-eq (get action details) "unwind")
-        (unwind 
-          (get sbtc-amount details)
-          (get sbtc-amount-2 details)
+      (begin
+        (try! (boost 
+          (get sbtc-amount details) 
+          (get aeusdc-amount details) 
           (get min-received details)
-          (get price-feed-bytes details))
+          (get price-feed-bytes details)))
+        (ok true)
+      )
+      (if (is-eq (get action details) "unwind")
+        (begin
+          (try! (unwind 
+            (get sbtc-amount details)
+            (get sbtc-amount-2 details)
+            (get min-received details)
+            (get price-feed-bytes details)))
+          (ok true)
+        )
         err-invalid-action
       )
     )
@@ -40,7 +46,7 @@
 )
 
 ;; ============================================================================
-;; BOOST: Supply sBTC → Borrow aeUSDC → Swap to sBTC → Supply more
+;; BOOST: Supply sBTC ToBorrow aeUSDC ToSwap to sBTC ToSupply more
 ;; ============================================================================
 
 (define-private (boost 
@@ -79,13 +85,13 @@
         { asset: 'SP4SZE494VC2YC5JYG7AYFQ44F5Q4PYV7DVMDPBG.ststxbtc-token, lp-token: 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.zststxbtc-v2_v2-0, oracle: 'SP2VCQJGH7PHP2DJK7Z0V48AGBHQAW3R3ZW1QF4N.stx-btc-oracle-v1-4 }
       )
       aeusdc-to-borrow
-      'SP3Y2ZSH8P7D50B0VBTSX11S7XSG24M1VB9YFQA4K.fees-calculator
+      'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.fees-calculator
       u0
       tx-sender
       price-feed-bytes
     ))
     
-    ;; Step 3: Swap aeUSDC → STX → sBTC via Bitflow
+    ;; Step 3: Swap aeUSDC ToSTX TosBTC via Bitflow
     (let ((sbtc-received (try! (contract-call? 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-swap-helper-v-1-3 swap-helper-b
         aeusdc-to-borrow
         min-sbtc-from-swap
@@ -131,7 +137,7 @@
 )
 
 ;; ============================================================================
-;; UNWIND: Withdraw sBTC → Swap to aeUSDC → Repay → Withdraw remaining
+;; UNWIND: Withdraw sBTC ToSwap to aeUSDC ToRepay ToWithdraw remaining
 ;; ============================================================================
 
 (define-private (unwind 
@@ -164,7 +170,7 @@
       price-feed-bytes
     ))
     
-    ;; Step 2: Swap sBTC → STX → aeUSDC via Bitflow
+    ;; Step 2: Swap sBTC ToSTX ToaeUSDC via Bitflow
     (let ((aeusdc-received (try! (contract-call? 'SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.xyk-swap-helper-v-1-3 swap-helper-b
         sbtc-to-swap
         min-aeusdc-from-swap
