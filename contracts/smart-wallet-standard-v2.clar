@@ -541,26 +541,10 @@
   )
 )
 
-(define-public (propose-transfer-wallet
-    (new-admin principal)
-    (sig-auth {
-      auth-id: uint,
-      signature: (buff 64),
-      pubkey: (buff 33),
-    })
-  )
+(define-public (propose-transfer-wallet (new-admin principal))
   (begin
-    (try! (is-authorized (some {
-      message-hash: (contract-call? 
-        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
-        build-transfer-wallet-hash {
-        auth-id: (get auth-id sig-auth),
-        new-admin: new-admin,
-      }),
-      signature: (get signature sig-auth),
-      pubkey: (get pubkey sig-auth),
-    })))
-    (asserts! (not (is-eq new-admin (var-get owner))) err-forbidden)
+    (try! (is-admin-calling tx-sender))
+    (asserts! (not (is-eq new-admin tx-sender)) err-forbidden)
     (var-set pending-transfer new-admin)
     (update-activity)
     (print { a: "propose-transfer-wallet", proposed: new-admin })
@@ -568,14 +552,29 @@
   )
 )
 
-(define-public (confirm-transfer-wallet)
+(define-public (confirm-transfer-wallet
+    (sig-auth {
+      auth-id: uint,
+      signature: (buff 64),
+      pubkey: (buff 33),
+    })
+  )
   (let ((pending (var-get pending-transfer)))
     (asserts! (not (is-eq pending 'SP000000000000000000002Q6VF78)) err-no-pending-transfer)
-    (try! (is-admin-calling tx-sender))
+    (try! (is-authorized (some {
+      message-hash: (contract-call? 
+        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+        build-confirm-transfer-hash {
+        auth-id: (get auth-id sig-auth),
+        new-admin: pending,
+      }),
+      signature: (get signature sig-auth),
+      pubkey: (get pubkey sig-auth),
+    })))
     (try! (ft-mint? ect u1 current-contract))
     (try! (ft-burn? ect u1 current-contract))
     (map-set admins pending true)
-    (map-delete admins tx-sender)
+    (map-delete admins (var-get owner))
     (var-set owner pending)
     (var-set pending-transfer 'SP000000000000000000002Q6VF78)
     (update-activity)

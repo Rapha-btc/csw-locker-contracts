@@ -122,14 +122,14 @@
     )))
 )
 
-(define-read-only (build-transfer-wallet-hash (details {
+(define-read-only (build-confirm-transfer-hash (details {
   auth-id: uint,
   new-admin: principal,
 }))
   (sha256 (concat SIP018_MSG_PREFIX
     (concat (get-domain-hash)
       (sha256 (unwrap-panic (to-consensus-buff? {
-        topic: "transfer-wallet",
+        topic: "confirm-transfer",
         auth-id: (get auth-id details),
         new-admin: (get new-admin details),
       })))
