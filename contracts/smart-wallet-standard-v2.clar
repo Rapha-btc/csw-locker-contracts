@@ -30,6 +30,7 @@
 
 (define-constant INACTIVITY-PERIOD u52560) 
 (define-constant DEPLOYED-BURNT-BLOCK burn-block-height)
+(define-constant SBTC-CONTRACT 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token)
 
 (define-data-var last-activity-block uint burn-block-height)
 (define-data-var recovery-address principal 'SP000000000000000000002Q6VF78)
@@ -49,13 +50,11 @@
 (define-data-var wallet-config {
   stx-threshold: uint,           ;; e.g. u100000000 (100 STX)   ;; Thresholds (above = cooldown required)
   sbtc-threshold: uint,          ;; e.g. u100000 (0.001 BTC)
-  sip-threshold: uint,         ;; e.g. u1000 (1000 micro tokens)
   cooldown-period: uint,         ;; e.g. u144 (24h in burn blocks)   ;; Cooldown settings
   config-signaled-at: (optional uint),   ;; Config change signaling
 } {
   stx-threshold: u100000000,
   sbtc-threshold: u100000,
-  sip-threshold: u1000,
   cooldown-period: u144,
   config-signaled-at: none,
 })
@@ -63,12 +62,10 @@
 (define-data-var spent-this-period {
   stx: uint,
   sbtc: uint,
-  sip: uint,
   period-start: uint,
 } {
   stx: u0,
   sbtc: u0,
-  sip: u0,
   period-start: DEPLOYED-BURNT-BLOCK,
 })
 
@@ -80,7 +77,7 @@
     )
     (if period-expired
       ;; Reset if period expired
-      { stx: u0, sbtc: u0, sip: u0, period-start: burn-block-height }
+      { stx: u0, sbtc: u0, period-start: burn-block-height }
       spent
     )
   )
@@ -95,12 +92,6 @@
 (define-private (add-spent-sbtc (amount uint))
   (let ((current (get-current-spent)))
     (var-set spent-this-period (merge current { sbtc: (+ (get sbtc current) amount) }))
-  )
-)
-
-(define-private (add-spent-sip (amount uint))
-  (let ((current (get-current-spent)))
-    (var-set spent-this-period (merge current { sip: (+ (get sip current) amount) }))
   )
 )
 
@@ -135,7 +126,6 @@
 (define-public (set-wallet-config
     (new-stx-threshold uint)
     (new-sbtc-threshold uint)
-    (new-sip-threshold uint)
     (new-cooldown-period uint)
   )
   (let (
@@ -148,7 +138,6 @@
     (var-set wallet-config {
       stx-threshold: new-stx-threshold,
       sbtc-threshold: new-sbtc-threshold,
-      sip-threshold: new-sip-threshold,
       cooldown-period: new-cooldown-period,
       config-signaled-at: none,
     })
@@ -156,7 +145,6 @@
       a: "set-wallet-config", 
       stx-threshold: new-stx-threshold,
       sbtc-threshold: new-sbtc-threshold,
-      sip-threshold: new-sip-threshold,
       cooldown-period: new-cooldown-period,
     })
     (ok true)
@@ -230,15 +218,6 @@
   )
 )
 
-(define-private (would-exceed-sip-threshold (amount uint))
-  (let (
-      (config (var-get wallet-config))
-      (spent (get-current-spent))
-    )
-    (> (+ (get sip spent) amount) (get sip-threshold config))
-  )
-)
-
 ;; Authentication
 (define-private (is-authorized (sig-message-auth (optional {
   message-hash: (buff 32),
@@ -255,6 +234,40 @@
 
 (define-read-only (is-admin-calling (caller principal))
   (ok (asserts! (is-some (map-get? admins caller)) err-unauthorised))
+)
+
+;; Extension white listing
+(define-public (whitelist-extension (extension principal))
+  (begin
+    (try! (is-authorized none))
+    ;; Whitelisting always goes through cooldown
+    (create-pending-operation "whitelist-ext" u0 extension none (some extension) none)
+  )
+)
+
+(define-public (execute-pending-whitelist (op-id uint))
+  (let ((op (unwrap! (map-get? pending-operations op-id) err-invalid-operation)))
+    (asserts! (is-eq (get op-type op) "whitelist-ext") err-invalid-operation)
+    (asserts! (not (get executed op)) err-already-executed)
+    (asserts! (not (get vetoed op)) err-vetoed)
+    (asserts! (>= burn-block-height (get execute-after op)) err-cooldown-not-passed)
+    (try! (is-authorized none))
+    (map-set pending-operations op-id (merge op { executed: true }))
+    (map-set whitelisted-extensions (unwrap! (get extension op) err-invalid-operation) true)
+    (print { a: "extension-whitelisted", extension: (get extension op) })
+    (ok true)
+  )
+)
+
+(define-public (remove-extension-whitelist (extension principal))
+  (begin
+    (try! (is-authorized none))
+    (ok (map-delete whitelisted-extensions extension))
+  )
+)
+
+(define-read-only (is-extension-whitelisted (extension principal))
+  (default-to false (map-get? whitelisted-extensions extension))
 )
 
 ;; Action functions
@@ -286,18 +299,46 @@
       })))
       (try! (is-authorized none))
     )
+    ;; Check cumulative threshold
+    (if (would-exceed-stx-threshold amount)
+      ;; Exceeds threshold → create pending operation
+      (create-pending-operation "stx-transfer" amount recipient none none none)
+      ;; Under threshold → execute immediately
+      (begin
+        (add-spent-stx amount)
+        (print {
+          a: "stx-transfer",
+          payload: { amount: amount, recipient: recipient, memo: memo },
+        })
+        (as-contract? ((with-stx amount))
+          (match memo
+            to-print (try! (stx-transfer-memo? amount tx-sender recipient to-print))
+            (try! (stx-transfer? amount tx-sender recipient))
+          ))
+      )
+    )
+  )
+)
+
+(define-public (execute-pending-stx-transfer 
+    (op-id uint)
+    (memo (optional (buff 34)))
+  )
+  (let ((op (unwrap! (map-get? pending-operations op-id) err-invalid-operation)))
+    (asserts! (is-eq (get op-type op) "stx-transfer") err-invalid-operation)
+    (asserts! (not (get executed op)) err-already-executed)
+    (asserts! (not (get vetoed op)) err-vetoed)
+    (asserts! (>= burn-block-height (get execute-after op)) err-cooldown-not-passed)
+    (try! (is-authorized none))
+    (map-set pending-operations op-id (merge op { executed: true }))
     (print {
       a: "stx-transfer",
-      payload: {
-        amount: amount,
-        recipient: recipient,
-        memo: memo,
-      },
+      payload: { amount: (get amount op), recipient: (get recipient op), memo: memo },
     })
-    (as-contract? ((with-stx amount))
+    (as-contract? ((with-stx (get amount op)))
       (match memo
-        to-print (try! (stx-transfer-memo? amount tx-sender recipient to-print))
-        (try! (stx-transfer? amount tx-sender recipient))
+        to-print (try! (stx-transfer-memo? (get amount op) tx-sender (get recipient op) to-print))
+        (try! (stx-transfer? (get amount op) tx-sender (get recipient op)))
       ))
   )
 )
@@ -313,6 +354,8 @@
   )
   (begin
     (update-activity)
+    ;; Must be whitelisted
+    (asserts! (is-extension-whitelisted (contract-of extension)) err-not-whitelisted)
     (match sig-auth
       sig-auth-details (try! (is-authorized (some {
         message-hash: (contract-call?
@@ -331,10 +374,7 @@
     (try! (ft-burn? ect u1 current-contract))
     (print {
       a: "extension-call",
-      payload: {
-        extension: extension,
-        payload: payload,
-      },
+      payload: { extension: extension, payload: payload },
     })
     (as-contract? ((with-all-assets-unsafe))
       (try! (contract-call? extension call payload))
@@ -372,17 +412,46 @@
       })))
       (try! (is-authorized none))
     )
+    ;; Check if sBTC and would exceed threshold
+    (if (and (is-eq (contract-of sip010) SBTC-CONTRACT) (would-exceed-sbtc-threshold amount))
+      ;; sBTC exceeds threshold → pending
+      (create-pending-operation "sbtc-transfer" amount recipient (some SBTC-CONTRACT) none none)
+      ;; Under threshold or not sBTC → execute immediately
+      (begin
+        (if (is-eq (contract-of sip010) SBTC-CONTRACT)
+          (add-spent-sbtc amount)
+          true
+        )
+        (print {
+          a: "sip010-transfer",
+          payload: { amount: amount, recipient: recipient, memo: memo, sip010: sip010 },
+        })
+        (as-contract? ((with-ft (contract-of sip010) token-name amount))
+          (try! (contract-call? sip010 transfer amount current-contract recipient memo))
+        )
+      )
+    )
+  )
+)
+
+(define-public (execute-pending-sbtc-transfer
+    (op-id uint)
+    (memo (optional (buff 34)))
+  )
+  (let ((op (unwrap! (map-get? pending-operations op-id) err-invalid-operation)))
+    (asserts! (is-eq (get op-type op) "sbtc-transfer") err-invalid-operation)
+    (asserts! (not (get executed op)) err-already-executed)
+    (asserts! (not (get vetoed op)) err-vetoed)
+    (asserts! (>= burn-block-height (get execute-after op)) err-cooldown-not-passed)
+    (try! (is-authorized none))
+    (map-set pending-operations op-id (merge op { executed: true }))
     (print {
       a: "sip010-transfer",
-      payload: {
-        amount: amount,
-        recipient: recipient,
-        memo: memo,
-        sip010: sip010,
-      },
+      payload: { amount: (get amount op), recipient: (get recipient op), memo: memo, sip010: SBTC-CONTRACT },
     })
-    (as-contract? ((with-ft (contract-of sip010) token-name amount))
-      (try! (contract-call? sip010 transfer amount current-contract recipient memo))
+    (as-contract? ((with-ft SBTC-CONTRACT "sBTC" (get amount op)))
+      (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token transfer 
+        (get amount op) current-contract (get recipient op) memo))
     )
   )
 )
