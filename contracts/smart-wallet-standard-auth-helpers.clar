@@ -135,3 +135,19 @@
       })))
     )))
 )
+
+(define-read-only (build-whitelist-extension-hash (details {
+  auth-id: uint,
+  op-id: uint,
+  extension: principal,
+}))
+  (sha256 (concat SIP018_MSG_PREFIX
+    (concat (get-domain-hash)
+      (sha256 (unwrap-panic (to-consensus-buff? {
+        topic: "whitelist-extension",
+        auth-id: (get auth-id details),
+        op-id: (get op-id details),
+        extension: (get extension details),
+      })))
+    )))
+)

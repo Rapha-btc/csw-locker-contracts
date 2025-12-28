@@ -260,19 +260,35 @@
 ;; Extension white listing
 (define-public (whitelist-extension (extension principal))
   (begin
-    (try! (is-authorized none))
-    ;; Whitelisting always goes through cooldown
+    (try! (is-admin-calling tx-sender))
     (create-pending-operation "whitelist-ext" u0 extension none (some extension) none)
   )
 )
 
-(define-public (execute-pending-whitelist (op-id uint))
+(define-public (execute-pending-whitelist 
+    (op-id uint)
+    (sig-auth {
+      auth-id: uint,
+      signature: (buff 64),
+      pubkey: (buff 33),
+    })
+  )
   (let ((op (unwrap! (map-get? pending-operations op-id) err-invalid-operation)))
     (asserts! (is-eq (get op-type op) "whitelist-ext") err-invalid-operation)
     (asserts! (not (get executed op)) err-already-executed)
     (asserts! (not (get vetoed op)) err-vetoed)
     (asserts! (>= burn-block-height (get execute-after op)) err-cooldown-not-passed)
-    (try! (is-authorized none))
+    (try! (is-authorized (some {
+      message-hash: (contract-call? 
+        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+        build-whitelist-extension-hash {
+        auth-id: (get auth-id sig-auth),
+        op-id: op-id,
+        extension: (unwrap! (get extension op) err-invalid-operation),
+      }),
+      signature: (get signature sig-auth),
+      pubkey: (get pubkey sig-auth),
+    })))
     (map-set pending-operations op-id (merge op { executed: true }))
     (map-set whitelisted-extensions (unwrap! (get extension op) err-invalid-operation) true)
     (print { a: "extension-whitelisted", extension: (get extension op) })
