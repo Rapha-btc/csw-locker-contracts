@@ -26,9 +26,13 @@
 (define-constant err-not-signaled (err u4016))
 (define-constant err-cooldown-not-passed (err u4017))
 (define-constant err-threshold-exceeded (err u4018))
+(define-constant err-cooldown-too-long (err u4019))
+(define-constant err-no-pending-transfer (err u4020))
+(define-constant err-no-pending-pubkey (err u4021))
 (define-constant err-fatal-owner-not-admin (err u9999))
 
 (define-constant INACTIVITY-PERIOD u52560) 
+(define-constant MAX-CONFIG-COOLDOWN u4032) ;; ~28 days max for config changes
 (define-constant DEPLOYED-BURNT-BLOCK burn-block-height)
 (define-constant SBTC-CONTRACT 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token)
 
@@ -36,8 +40,17 @@
 (define-data-var recovery-address principal 'SP000000000000000000002Q6VF78)
 (define-data-var initial-pubkey (buff 33) 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)
 
+(define-data-var pending-pubkey {
+  pubkey: (buff 33),
+  proposed-at: uint,
+} {
+  pubkey: (var-get initial-pubkey),
+  proposed-at: u0,
+})
+
 (define-data-var owner principal 'SP000000000000000000002Q6VF78)
 (define-data-var pending-recovery principal 'SP000000000000000000002Q6VF78)
+(define-data-var pending-transfer principal 'SP000000000000000000002Q6VF78)
 
 (define-fungible-token ect)
 
@@ -131,10 +144,16 @@
   (let (
       (config (var-get wallet-config))
       (signaled-at (default-to u0 (get config-signaled-at config)))
+      (wallet-cooldown (get cooldown-period config))
+      ;; Config change waits min of current cooldown or MAX-CONFIG-COOLDOWN
+      (effective-config-cooldown (if (> wallet-cooldown MAX-CONFIG-COOLDOWN)
+        MAX-CONFIG-COOLDOWN
+        wallet-cooldown
+      ))
     )
     (try! (is-authorized none))
     (asserts! (not (is-eq signaled-at u0)) err-not-signaled)
-    (asserts! (>= burn-block-height (+ signaled-at (get cooldown-period config))) err-in-cooldown)
+    (asserts! (>= burn-block-height (+ signaled-at effective-config-cooldown)) err-in-cooldown)
     (var-set wallet-config {
       stx-threshold: new-stx-threshold,
       sbtc-threshold: new-sbtc-threshold,
@@ -520,37 +539,85 @@
   )
 )
 
-(define-public (transfer-wallet (new-admin principal))
-  (begin
-    ;; Only allow the admin to transfer the wallet. Signature authentication is
-    ;; disabled.
-    (try! (is-authorized none))
-    (asserts! (not (is-eq new-admin tx-sender)) err-forbidden)
-    (try! (ft-mint? ect u1 current-contract))
-    (try! (ft-burn? ect u1 current-contract))
-    (map-set admins new-admin true)
-    (map-delete admins tx-sender)
-    (var-set owner new-admin)
-    (print {
-      a: "transfer-wallet",
-      payload: { new-admin: new-admin },
+(define-public (propose-transfer-wallet
+    (new-admin principal)
+    (sig-auth {
+      auth-id: uint,
+      signature: (buff 64),
+      pubkey: (buff 33),
     })
+  )
+  (begin
+    (try! (is-authorized (some {
+      message-hash: (contract-call? 
+        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+        build-transfer-wallet-hash {
+        auth-id: (get auth-id sig-auth),
+        new-admin: new-admin,
+      }),
+      signature: (get signature sig-auth),
+      pubkey: (get pubkey sig-auth),
+    })))
+    (asserts! (not (is-eq new-admin (var-get owner))) err-forbidden)
+    (var-set pending-transfer new-admin)
+    (update-activity)
+    (print { a: "propose-transfer-wallet", proposed: new-admin })
     (ok true)
   )
 )
 
-;;
-;; Secp256r1 elliptic curve signature authentication
-;;
+(define-public (confirm-transfer-wallet)
+  (let ((pending (var-get pending-transfer)))
+    (asserts! (not (is-eq pending 'SP000000000000000000002Q6VF78)) err-no-pending-transfer)
+    (try! (is-admin-calling tx-sender))
+    (try! (ft-mint? ect u1 current-contract))
+    (try! (ft-burn? ect u1 current-contract))
+    (map-set admins pending true)
+    (map-delete admins tx-sender)
+    (var-set owner pending)
+    (var-set pending-transfer 'SP000000000000000000002Q6VF78)
+    (update-activity)
+    (print { a: "confirm-transfer-wallet", new-admin: pending })
+    (ok true)
+  )
+)
 
 ;; Admin can use this to set or update their public key for future
-;; authentication using secp256r1 elliptic curve signature.
-(define-public (add-admin-pubkey (pubkey (buff 33)))
+(define-public (propose-admin-pubkey (pubkey (buff 33)))
   (begin
-    ;; Only allow the admin to update their own public key. Signature
-    ;; authentication is disabled.
-    (try! (is-authorized none))
-    (ok (map-set pubkey-to-admin pubkey tx-sender))
+    (try! (is-admin-calling tx-sender))
+    (var-set pending-pubkey {
+      pubkey: pubkey,
+      proposed-at: burn-block-height,
+    })
+    (update-activity)
+    (print { a: "propose-admin-pubkey", pubkey: pubkey, proposed-at: burn-block-height })
+    (ok true)
+  )
+)
+
+(define-public (confirm-admin-pubkey)
+  (let (
+      (pending (var-get pending-pubkey))
+      (config (var-get wallet-config))
+      (wallet-cooldown (get cooldown-period config))
+      (effective-cooldown (if (> wallet-cooldown MAX-CONFIG-COOLDOWN)
+        MAX-CONFIG-COOLDOWN
+        wallet-cooldown
+      ))
+      (pubk (get pubkey pending))
+    )
+    (asserts! (not (is-eq (get proposed-at pending) u0)) err-no-pending-pubkey)
+    (asserts! (>= burn-block-height (+ (get proposed-at pending) effective-cooldown)) err-in-cooldown)
+    (try! (is-admin-calling tx-sender))
+    (map-set pubkey-to-admin pubk tx-sender)
+    (var-set pending-pubkey {
+      pubkey: 0x000000000000000000000000000000000000000000000000000000000000000000,
+      proposed-at: u0,
+    })
+    (update-activity)
+    (print { a: "confirm-admin-pubkey", pubkey: pubk })
+    (ok true)
   )
 )
 
