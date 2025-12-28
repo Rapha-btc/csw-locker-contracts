@@ -3,7 +3,7 @@
 ;; summary: Extendible single-owner smart wallet with standard SIP-010 and SIP-009 support
 
 ;; Using deployer address for testing.
-(use-trait extension-trait 'ST3FFRX7C911PZP5RHE148YDVDD9JWVS6FZRA60VS.extension-trait.extension-trait)
+(use-trait extension-trait 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.extension-trait.extension-trait)
 
 (use-trait sip-010-trait 'SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard.sip-010-trait)
 (use-trait sip-009-trait 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait.nft-trait)
@@ -280,7 +280,7 @@
     (asserts! (>= burn-block-height (get execute-after op)) err-cooldown-not-passed)
     (try! (is-authorized (some {
       message-hash: (contract-call? 
-        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+        .smart-wallet-standard-auth-helpers
         build-whitelist-extension-hash {
         auth-id: (get auth-id sig-auth),
         op-id: op-id,
@@ -324,7 +324,7 @@
     (match sig-auth
       sig-auth-details (try! (is-authorized (some {
         message-hash: (contract-call?
-          'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+          .smart-wallet-standard-auth-helpers
           build-stx-transfer-hash {
           auth-id: (get auth-id sig-auth-details),
           amount: amount,
@@ -338,9 +338,12 @@
     )
     ;; Check cumulative threshold
     (if (would-exceed-stx-threshold amount)
-      ;; Exceeds threshold → create pending operation
-      (create-pending-operation "stx-transfer" amount recipient none none none)
-      ;; Under threshold → execute immediately
+      ;; Exceeds threshold To create pending operation
+      (begin
+        (unwrap-panic (create-pending-operation "stx-transfer" amount recipient none none none))
+        (ok true)
+      )
+      ;; Under threshold To execute immediately
       (begin
         (add-spent-stx amount)
         (print {
@@ -396,7 +399,7 @@
     (match sig-auth
       sig-auth-details (try! (is-authorized (some {
         message-hash: (contract-call?
-          'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+          .smart-wallet-standard-auth-helpers
           build-extension-call-hash {
           auth-id: (get auth-id sig-auth-details),
           extension: (contract-of extension),
@@ -436,7 +439,7 @@
     (match sig-auth
       sig-auth-details (try! (is-authorized (some {
         message-hash: (contract-call?
-          'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+          .smart-wallet-standard-auth-helpers
           build-sip010-transfer-hash {
           auth-id: (get auth-id sig-auth-details),
           amount: amount,
@@ -451,9 +454,12 @@
     )
     ;; Check if sBTC and would exceed threshold
     (if (and (is-eq (contract-of sip010) SBTC-CONTRACT) (would-exceed-sbtc-threshold amount))
-      ;; sBTC exceeds threshold → pending
-      (create-pending-operation "sbtc-transfer" amount recipient (some SBTC-CONTRACT) none none)
-      ;; Under threshold or not sBTC → execute immediately
+      ;; sBTC exceeds threshold To pending
+      (begin
+        (unwrap-panic (create-pending-operation "sbtc-transfer" amount recipient (some SBTC-CONTRACT) none none))
+        (ok true)
+      )
+      ;; Under threshold or not sBTC To execute immediately
       (begin
         (if (is-eq (contract-of sip010) SBTC-CONTRACT)
           (add-spent-sbtc amount)
@@ -509,7 +515,7 @@
     (match sig-auth
       sig-auth-details (try! (is-authorized (some {
         message-hash: (contract-call?
-          'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+          .smart-wallet-standard-auth-helpers
           build-sip009-transfer-hash {
           auth-id: (get auth-id sig-auth-details),
           nft-id: nft-id,
@@ -579,7 +585,7 @@
     (asserts! (not (is-eq pending 'SP000000000000000000002Q6VF78)) err-no-pending-transfer)
     (try! (is-authorized (some {
       message-hash: (contract-call? 
-        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+        .smart-wallet-standard-auth-helpers
         build-confirm-transfer-hash {
         auth-id: (get auth-id sig-auth),
         new-admin: pending,
@@ -707,7 +713,7 @@
     (asserts! (not (var-get is-initialized)) err-already-initialized)
     (try! (is-authorized (some {
       message-hash: (contract-call? 
-        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+        .smart-wallet-standard-auth-helpers
         build-add-admin-hash {
         auth-id: (get auth-id sig-auth),
         new-admin: new-admin,
@@ -738,7 +744,7 @@
   (begin
     (try! (is-authorized (some {
       message-hash: (contract-call? 
-        'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.smart-wallet-standard-auth-helpers
+        .smart-wallet-standard-auth-helpers
         build-propose-recovery-hash {
         auth-id: (get auth-id sig-auth),
         new-recovery: new-recovery,
@@ -794,9 +800,9 @@
 (begin
     (var-set initial-pubkey 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)
     (map-set pubkey-to-admin 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca 'SP000000000000000000002Q6VF78)
-    (add-admin-with-signature 'SPZSQNQF9SM88N00K4XYV05ZAZRACC748T78P5P3 {
-      auth-id: u0,
-      signature: 0x3045022100dff1d77f2a671c5f36183726db2341be0e6f5e8ff12e7c6f3c8f1a5a4f1baac6022036efc3f4a31188eb0c6e7b6f5d4a3e6e0b4e7f5e8f3c6f7e8f9e0f1a2b3c4d5e6,
-      pubkey: 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca,
-    })
+    ;; (add-admin-with-signature 'SPZSQNQF9SM88N00K4XYV05ZAZRACC748T78P5P3 {
+    ;;   auth-id: u0,
+    ;;   signature: 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca,
+    ;;   pubkey: 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca,
+    ;; })
 )
