@@ -798,7 +798,6 @@
 ;; )
 
 (begin
-    (var-set initial-pubkey 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca)
     (map-set pubkey-to-admin 0x036e0ee032648d4ae5c45f3cdbb21771b01d6f2e0fd5c3db2c524ee9fc6b0d39ca 'SP000000000000000000002Q6VF78)
     ;; (add-admin-with-signature 'SPZSQNQF9SM88N00K4XYV05ZAZRACC748T78P5P3 {
     ;;   auth-id: u0,
